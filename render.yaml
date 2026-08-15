@@ -1,0 +1,15 @@
+{
+  "name": "nova-tts-monitor",
+  "type": "python",
+  "region": "oregon",
+  "env": "docker",
+  "buildCommand": "",
+  "startCommand": "python tts_monitor.py",
+  "healthCheckPath": "/api/status",
+  "initialSize": "basic",
+  "instances": 1,
+  "restartPolicy": {
+    "name": "on_failure",
+    "maxRetries": 5
+  }
+}
