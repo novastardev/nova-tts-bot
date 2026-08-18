@@ -1,11 +1,10 @@
 {
-  "name": "nova-tts-monitor",
+  "name": "nova-tts-bot",
   "type": "python",
   "region": "oregon",
-  "env": "docker",
-  "buildCommand": "",
-  "startCommand": "python tts_monitor.py",
-  "healthCheckPath": "/api/status",
+  "buildCommand": "pip install -r requirements.txt",
+  "startCommand": "python3 bot.py",
+  "healthCheckPath": "/health",
   "initialSize": "basic",
   "instances": 1,
   "restartPolicy": {
