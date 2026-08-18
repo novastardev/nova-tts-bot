@@ -1,7 +1,9 @@
+import io
+import logging
 import os
+import json
 import http.server
 import socketserver
-import json
 import threading
 import time
 from datetime import datetime
@@ -25,7 +27,491 @@ TZ = os.environ.get('TZ', 'UTC')
 from zoneinfo import ZoneInfo
 tz = ZoneInfo(TZ)
 
+# ============================================================
+# TELEGRAM BOT IMPORTS
+# ============================================================
+try:
+    from telegram import (
+        Update,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
+    )
+    from telegram.ext import (
+        Application,
+        CommandHandler,
+        MessageHandler,
+        CallbackQueryHandler,
+        ContextTypes,
+        filters,
+    )
+    from config import (
+        TELEGRAM_BOT_TOKEN,
+        ALLOWED_CHAT_IDS,
+        BOT_OWNER_HANDLE,
+    )
+    from database import (
+        init_db,
+        add_user,
+        get_voice,
+        set_voice,
+        save_to_library,
+        get_library,
+        get_library_item,
+        delete_from_library,
+    )
+    from tts import (
+        get_voices,
+        generate_speech,
+    )
+    HAS_TELEGRAM = True
+except ImportError:
+    HAS_TELEGRAM = False
+    print("⚠️ Telegram dependencies not installed. Dashboard will still work!")
+
+# Log directory for bot logs
 LOG_PATH = Path('/var/log/nova-tts.log')
+
+# Log lines for the dashboard
+log_lines = []
+lastLogCount = 0
+bot_username = "nova-tts-bot"
+
+# Access control for the bot
+def is_chat_allowed(user_id):
+    return user_id in ALLOWED_CHAT_IDS
+
+# ============================================================
+# TELEGRAM BOT FUNCTIONS
+# ============================================================
+
+# Users who clicked Text to Speech and are expected
+# to send text.
+waiting_for_text = set()
+
+# Store pending audio data for saving to library
+# Format: {user_id: {"text": str, "voice": str, "message_id": int}}
+pending_saves = {}
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    try:
+        user_id = update.effective_user.id
+        if not is_chat_allowed(user_id):
+            await update.message.reply_text(
+                f"❌ Access Denied\n\n"
+                f"Please ask {BOT_OWNER_HANDLE} to grant you access to this bot."
+            )
+            return
+        add_user(user_id)
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🎙️ Text to Speech",
+                    callback_data="tts",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "⚙️ Settings",
+                    callback_data="settings",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📚 My Library",
+                    callback_data="library_view",
+                )
+            ],
+        ]
+        await update.message.reply_text(
+            "🔊 *Text to Speech Bot*\n\n"
+            "Convert your text into natural speech with multiple voices.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "*Built by Novastar* 👨‍💻\n\n"
+            "A passionate IT developer creating awesome tools.\n"
+            "Currently focused on building intelligent Telegram bots and innovative solutions.\n\n"
+            "*Get in touch:*\n"
+            "• Telegram: @novastar\n"
+            "• Portfolio: novastar-dev.vercel.app\n\n"
+            "Feel free to reach out for collaborations, questions, or just to say hi! 😁\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logger.exception("START ERROR")
+        await update.message.reply_text("❌ Something went wrong.")
+
+async def settings(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    try:
+        user_id = update.effective_user.id
+        add_user(user_id)
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🔊 Voice",
+                    callback_data="settings_voice",
+                )
+            ],
+        ]
+        await update.message.reply_text(
+            "⚙️ *Settings*",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logger.exception("SETTINGS ERROR")
+        await update.message.reply_text("❌ Unable to open settings.")
+
+async def library(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    try:
+        user_id = update.effective_user.id
+        add_user(user_id)
+        library_items = get_library(user_id, limit=10)
+        if not library_items:
+            await update.message.reply_text(
+                "📚 *Your Library*\n\n"
+                "No saved audios yet.\n\n"
+                "Generate some text-to-speech and save them to your library!",
+                parse_mode="Markdown",
+            )
+            return
+        keyboard = []
+        for item in library_items:
+            item_id = item[0]
+            text = item[1]
+            voice = item[2]
+            created_at = item[4]
+            short_text = text[:30] + "..." if len(text) > 30 else text
+            button_text = f"📄 {short_text}"
+            keyboard.append([
+                InlineKeyboardButton(button_text, callback_data=f"lib:{item_id}")
+            ])
+        await update.message.reply_text(
+            "📚 *Your Library*\n\n"
+            "Click any to view details",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logger.exception("LIBRARY ERROR")
+        await update.message.reply_text("❌ Unable to open library.")
+
+async def library_callback(query, user_id):
+    try:
+        library_items = get_library(user_id, limit=10)
+        if not library_items:
+            await query.message.reply_text(
+                "📚 *Your Library*\n\n"
+                "No saved audios yet.\n\n"
+                "Generate some text-to-speech and save them to your library!",
+                parse_mode="Markdown",
+            )
+            return
+        keyboard = []
+        for item in library_items:
+            item_id = item[0]
+            text = item[1]
+            voice = item[2]
+            created_at = item[4]
+            short_text = text[:30] + "..." if len(text) > 30 else text
+            button_text = f"📄 {short_text}"
+            keyboard.append([
+                InlineKeyboardButton(button_text, callback_data=f"lib:{item_id}")
+            ])
+        await query.edit_message_text(
+            "📚 *Your Library*\n\n"
+            "Click any to view details",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logger.exception("LIBRARY ERROR")
+        await query.message.reply_text("❌ Unable to open library.")
+
+async def button_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    query = update.callback_query
+    try:
+        user_id = query.from_user.id
+        data = query.data
+        if not is_chat_allowed(user_id):
+            await query.answer(f"Access denied. Ask {BOT_OWNER_HANDLE}", show_alert=True)
+            return
+        await query.answer()
+        add_user(user_id)
+
+        if data == "tts":
+            waiting_for_text.add(user_id)
+            await query.message.reply_text(
+                "📝 *Send the text you want to convert to speech.*",
+                parse_mode="Markdown",
+            )
+            return
+
+        if data == "settings":
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔊 Voice", callback_data="settings_voice"),
+                ],
+            ]
+            await query.edit_message_text(
+                "⚙️ *Settings*",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown",
+            )
+            return
+
+        if data == "library_view":
+            await library_callback(query, user_id)
+            return
+
+        if data == "settings_voice":
+            await query.edit_message_text("Loading voices...")
+            try:
+                voices = get_voices()
+                if not voices:
+                    await query.edit_message_text("No voices available. Contact @novastardev.")
+                    return
+                keyboard = []
+                for v_name, v_voice in voices:
+                    keyboard.append([
+                        InlineKeyboardButton(v_name, callback_data=f"voice:{v_voice}")
+                    ])
+                keyboard.append([
+                    InlineKeyboardButton("← Back", callback_data="settings"),
+                ])
+                await query.edit_message_text(
+                    "🔊 *Select a Voice*\n\n"
+                    "Choose the voice for your text-to-speech.",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                logger.exception("VOICE LIST ERROR")
+                await query.edit_message_text("❌ Unable to load voices.")
+
+        if data.startswith("voice:"):
+            selected_voice = data.split(":", 1)[1]
+            await query.edit_message_text(
+                f"✅ *Voice selected: {selected_voice}*\n\n"
+                f"Your voice preference has been updated.",
+                parse_mode="Markdown",
+            )
+            set_voice(user_id, selected_voice)
+            return
+
+        if data.startswith("lib:"):
+            item_id = data.split(":", 1)[1]
+            try:
+                item = get_library_item(user_id, int(item_id))
+                if not item:
+                    await query.answer("Item not found.", show_alert=True)
+                    return
+                text = item[1]
+                voice = item[2]
+                created_at = item[4]
+                await query.answer()
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🔊 Listen", callback_data=f"play:{item_id}"),
+                    ],
+                    [
+                        InlineKeyboardButton("🗑️ Delete", callback_data=f"del:{item_id}"),
+                    ],
+                    [
+                        InlineKeyboardButton("← Back to Library", callback_data="library_view"),
+                    ],
+                ]
+                await query.edit_message_text(
+                    f"📄 *Details*\n\n"
+                    f"📝 *Text:* {text}\n\n"
+                    f"🔊 *Voice:* {voice}\n\n"
+                    f"📅 *Created:* {created_at}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"*NOVA-TTS MONITOR v2.0*\n"
+                    f"© 2025 Nova-TTS",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                logger.exception("LIBRARY ITEM ERROR")
+                await query.answer("Error loading item.", show_alert=True)
+            return
+
+        if data.startswith("play:"):
+            item_id = data.split(":", 1)[1]
+            try:
+                item = get_library_item(user_id, int(item_id))
+                if not item:
+                    await query.answer("Item not found.", show_alert=True)
+                    return
+                audio_file_id = item[3]
+                if not audio_file_id:
+                    await query.answer("Audio not available.", show_alert=True)
+                    return
+                await query.answer()
+                voice = item[2]
+                text = item[1]
+                keyboard = [
+                    [
+                        InlineKeyboardButton("← Back", callback_data=f"lib:{item_id}"),
+                    ],
+                ]
+                await query.message.reply_voice(
+                    audio_file_id,
+                    caption=f"🔊 *Generated Voice*\n\n📝 *Text:* {text}\n🔊 *Voice:* {voice}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n*Built by Novastar*\n\nFeel free to reach out for collaborations, questions, or just to say hi! 😁",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                logger.exception("PLAY ERROR")
+                await query.answer("Error playing audio.", show_alert=True)
+            return
+
+        if data.startswith("del:"):
+            item_id = data.split(":", 1)[1]
+            try:
+                success = delete_from_library(user_id, int(item_id))
+                if success:
+                    await query.answer("✅ Deleted!", show_alert=True)
+                    await query.edit_message_text(
+                        "✅ *Deleted*\n\n"
+                        "The item has been removed from your library.",
+                        parse_mode="Markdown",
+                    )
+                else:
+                    await query.answer("Item not found.", show_alert=True)
+            except Exception:
+                logger.exception("DELETE ERROR")
+                await query.answer("Error deleting item.", show_alert=True)
+            return
+
+    except Exception:
+        logger.exception("CALLBACK ERROR")
+        await query.answer("Error processing request.", show_alert=True)
+
+async def handle_text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    try:
+        user_id = update.effective_user.id
+        user_text = update.message.text
+        if user_id in waiting_for_text:
+            waiting_for_text.discard(user_id)
+            try:
+                keyboard = [
+                    [
+                        InlineKeyboardButton("⚙️ Settings", callback_data="settings"),
+                    ],
+                ]
+                await update.message.reply_text(
+                    "⏳ *Generating speech...*",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown",
+                )
+                voice = get_voice(user_id)
+                if not voice:
+                    keyboard2 = [
+                        [
+                            InlineKeyboardButton("Select Voice", callback_data="settings_voice"),
+                        ],
+                        [
+                            InlineKeyboardButton("← Back", callback_data="tts"),
+                        ],
+                    ]
+                    await update.message.reply_text(
+                        "⚠️ No voice selected. Please select a voice first!",
+                        reply_markup=InlineKeyboardMarkup(keyboard2),
+                        parse_mode="Markdown",
+                    )
+                    return
+                result = generate_speech(user_text, voice)
+                if result.get("success"):
+                    audio = result.get("audio")
+                    if audio:
+                        await update.message.reply_voice(audio)
+                        pending_saves[user_id] = {
+                            "text": user_text,
+                            "voice": voice,
+                            "message_id": update.message.message_id,
+                        }
+                        keyboard = [
+                            [
+                                InlineKeyboardButton("💾 Save to Library", callback_data=f"save:{update.message.message_id}"),
+                            ],
+                            [
+                                InlineKeyboardButton("🔊 TTS Again", callback_data="tts"),
+                            ],
+                        ]
+                        await update.message.reply_text(
+                            "✅ *Speech generated!*\n\n"
+                            "Want to save this to your library?",
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                            parse_mode="Markdown",
+                        )
+                    else:
+                        await update.message.reply_text(
+                            "⚠️ No audio received. Please try again."
+                        )
+                else:
+                    error = result.get("error", "Unknown error")
+                    await update.message.reply_text(
+                        f"❌ Error: {error}\n\n"
+                        f"Please try again or contact @novastardev"
+                    )
+            except Exception:
+                logger.exception("TTS ERROR")
+                await update.message.reply_text("❌ Something went wrong.")
+    except Exception:
+        logger.exception("TEXT ERROR")
+        await update.message.reply_text("❌ Something went wrong.")
+
+async def error_handler(update, context):
+    logger.exception(context.error)
+
+async def cancel(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    try:
+        user_id = update.effective_user.id
+        waiting_for_text.discard(user_id)
+        keyboard = [
+            [
+                InlineKeyboardButton("🎙️ Text to Speech", callback_data="tts"),
+            ],
+            [
+                InlineKeyboardButton("⚙️ Settings", callback_data="settings"),
+            ],
+            [
+                InlineKeyboardButton("📚 My Library", callback_data="library_view"),
+            ],
+        ]
+        await update.message.reply_text(
+            "❌ *Cancelled*\n\n"
+            "What would you like to do next?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logger.exception("CANCEL ERROR")
+        await update.message.reply_text("❌ Unable to cancel operation.")
+
+# ============================================================
+# COLLECT LOGS
+# ============================================================
 
 # ============================================================
 # LIVE LOGS COLLECTION — reads existing + tails new
@@ -524,6 +1010,16 @@ class CyberHandler(http.server.BaseHTTPRequestHandler):
         log_lines.append(msg)
 
 # ============================================================
+# LOGGER SETUP
+# ============================================================
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+# ============================================================
 # START
 # ============================================================
 PORT = int(os.environ.get('PORT', 3900))
@@ -532,6 +1028,56 @@ class ReuseTCPServer(socketserver.TCPServer):
 
 server = ReuseTCPServer(("0.0.0.0", PORT), CyberHandler)
 print(f"🟢 Nova-TTS Monitor on port {PORT}")
+print(f"📊 Dashboard: http://0.0.0.0:{PORT}/")
 print(f"📊 API: http://0.0.0.0:{PORT}/api/status")
-print(f"💛 Deployed on: https://carpet-settle-jealous-stone.2n6.me/tts-health/")
+
+# ============================================================
+# START TELEGRAM BOT (in a separate thread)
+# ============================================================
+
+def run_telegram_bot():
+    if not HAS_TELEGRAM:
+        print("⚠️ Telegram not installed, skipping bot")
+        return
+    try:
+        from telegram import Bot
+        import os
+        from pathlib import Path
+        init_db(Path("bot.db"))
+        app = (
+            Application.builder()
+            .token(TELEGRAM_BOT_TOKEN)
+            .build()
+        )
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("settings", settings))
+        app.add_handler(CommandHandler("cancel", cancel))
+        app.add_handler(CommandHandler("library", library))
+        app.add_handler(CallbackQueryHandler(button_handler))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+        app.add_error_handler(error_handler)
+        print("--------------------------------")
+        print("🔊 TTS Telegram Bot starting...")
+        print("--------------------------------")
+        app.run_polling(
+            allowed_updates=["message", "callback_query"],
+            drop_pending_updates=True,
+        )
+    except Exception as e:
+        print(f"❌ Telegram bot error: {e}")
+        raise
+
+def run_bot_thread():
+    """Run the Telegram bot in a separate thread."""
+    try:
+        run_telegram_bot()
+    except Exception as e:
+        print(f"Bot thread error: {e}")
+
+# Start the Telegram bot in a background thread
+bot_thread = threading.Thread(target=run_bot_thread, daemon=True)
+bot_thread.start()
+print("🤖 Telegram bot running in background...")
+
+# Keep the server running
 server.serve_forever()

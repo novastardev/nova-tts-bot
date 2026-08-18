@@ -3,8 +3,8 @@
   "type": "python",
   "region": "oregon",
   "buildCommand": "pip install -r requirements.txt",
-  "startCommand": "python3 bot.py",
-  "healthCheckPath": "/health",
+  "startCommand": "python3 tts_monitor.py",
+  "healthCheckPath": "/api/status",
   "initialSize": "basic",
   "instances": 1,
   "restartPolicy": {
