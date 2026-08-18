@@ -340,7 +340,7 @@ async def error_handler(update, context):
 # ============================================================
 
 def main():
-    init_db("bot.db")
+    init_db()
     app = (
         Application.builder()
         .token(TELEGRAM_BOT_TOKEN)
