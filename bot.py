@@ -1,8 +1,7 @@
 import io
 import logging
-import io
-import logging
-import os, threading
+import os
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 def run():
