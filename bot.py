@@ -2,12 +2,84 @@ import io
 import logging
 import os
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from flask import Flask
 
-def run():
-    HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 8080))), BaseHTTPRequestHandler).serve_forever()
+# Flask app for health endpoint
+app = Flask(__name__)
 
-threading.Thread(target=run, daemon=True).start()
+@app.route("/health")
+def health():
+    """Beautiful cyberpunk health check page"""
+    return HEALTH_PAGE, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+HEALTH_PAGE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nova-TTS // Health</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0f;
+  color: #00ff41;
+  font-family: 'Share Tech Mono', monospace;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+.container {
+  text-align: center;
+  padding: 40px;
+  border: 1px solid #00ff41;
+  border-radius: 4px;
+  background: rgba(0, 255, 65, 0.05);
+  animation: glow 3s infinite;
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 10px #00ff4144, inset 0 0 10px #00ff4111; }
+  50% { box-shadow: 0 0 20px #00ffff44, inset 0 0 20px #00ffff11; }
+}
+h1 { font-size: 2em; letter-spacing: 4px; margin-bottom: 10px; }
+h1::before { content: "◆ "; color: #00ffff; }
+h1::after { content: " ◆"; color: #00ffff; }
+.status {
+  font-size: 1.5em;
+  margin: 20px 0;
+  padding: 20px;
+  border: 1px solid #00ff41;
+  background: rgba(0, 255, 65, 0.1);
+  border-radius: 4px;
+}
+.status .dot {
+  display: inline-block;
+  width: 12px; height: 12px;
+  background: #00ff41;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+  margin-right: 10px;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 10px #00ff41; }
+  50% { opacity: 0.4; box-shadow: 0 0 3px #00ff41; }
+}
+.info { color: #888; font-size: 0.8em; margin-top: 15px; }
+.footer { margin-top: 30px; color: #444; font-size: 0.7em; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>NOVA-TTS</h1>
+  <div class="status"><span class="dot"></span> SYSTEM ONLINE</div>
+  <div class="info">TELEGRAM TEXT-TO-SPEECH BOT // HEALTH CHECK</div>
+  <div class="footer">NOVA-TTS MONITOR v2.0 ◆ ALL SYSTEMS NOMINAL</div>
+</div>
+</body>
+</html>"""
+
+threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), use_reloader=False), daemon=True).start()
 from telegram import (
     Update,
     InlineKeyboardButton,
