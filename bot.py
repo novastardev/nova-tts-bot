@@ -1,7 +1,6 @@
 import io
 import logging
 import os
-from pathlib import Path
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -226,6 +225,8 @@ async def error_handler(update, context):
 
 def main():
     init_db()
+    PORT = int(os.environ.get("PORT", 8080))
+    
     app = (
         Application.builder()
         .token(TELEGRAM_BOT_TOKEN)
@@ -239,7 +240,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_error_handler(error_handler)
 
-    print("🔊 Nova-TTS Bot starting...")
+    print("🔊 Nova-TTS Bot starting on port", PORT)
     print("--------------------------------")
     app.run_polling(drop_pending_updates=True)
 
