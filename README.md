@@ -179,11 +179,17 @@ Edit `.env` with your values:
 
 The web interface lets anyone use TTS without Telegram — just open it in any browser.
 
+### One port, one process
+
+> 🚀 **Single-port mode (recommended):** run `python tts_monitor.py` — the web
+> dashboard and the Telegram bot run together in one process on one port.
+> `bot.py` is the bot-only entry point if you don't want the web dashboard.
+
 ### Start the server
 
 ```bash
-# Run the live monitor dashboard
-python tts_monitor.py &
+# Dashboard + bot together, one port
+python tts_monitor.py
 ```
 
 The server starts on port **8080** (or set via `PORT` env variable).
@@ -224,7 +230,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/nova-tts-bot
-ExecStart=/opt/nova-tts-bot/venv/bin/python bot.py
+ExecStart=/opt/nova-tts-bot/venv/bin/python tts_monitor.py
 Restart=always
 RestartSec=5
 User=www-data
@@ -258,7 +264,7 @@ handle_path /nova-tts/* {
 ```
 nova-tts-bot/
 ├── bot.py              # 🤖 Telegram bot (python-telegram-bot v21)
-├── tts_monitor.py      # 🌐 Web dashboard & API server (Flask)
+├── tts_monitor.py      # 🚀 Single-port entry point: web dashboard + bot
 ├── tts.py              # 🔊 TTS API integration (tts.ai)
 ├── config.py           # ⚙️ Environment variable loader
 ├── database.py         # 💾 SQLite database operations
@@ -292,7 +298,7 @@ nova-tts-bot/
 
 **Bot won't start**
 - Check `TELEGRAM_BOT_TOKEN` is correct in `.env`
-- Run `python bot.py` and read the error output
+- Run `python tts_monitor.py` and read the error output
 - Ensure `pip install -r requirements.txt` completed without errors
 
 **"Access Denied" message**
@@ -302,7 +308,7 @@ nova-tts-bot/
 
 **Monitor shows offline**
 - The bot must be running — the dashboard checks every 5 seconds
-- Check `python bot.py` is actually running
+- Check `python tts_monitor.py` is actually running (dashboard + bot in one process)
 - Check `bot.log` for errors
 
 **TTS generation fails**

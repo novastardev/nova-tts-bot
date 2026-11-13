@@ -3,7 +3,7 @@
   "type": "python",
   "region": "oregon",
   "buildCommand": "pip install -r requirements.txt",
-  "startCommand": "python3 bot.py",
+  "startCommand": "python3 tts_monitor.py",
   "initialSize": "basic",
   "instances": 1,
   "restartPolicy": {
