@@ -12,6 +12,7 @@ HEADERS = {
 
 
 def get_voices():
+    """Return voices as (name, id) tuples, English voices first."""
     response = requests.get(
         f"{BASE_URL}/voices/",
         headers=HEADERS,
@@ -21,7 +22,16 @@ def get_voices():
     response.raise_for_status()
 
     data = response.json()
-    return data.get("voices", [])
+    raw = data.get("voices", [])
+    voices = []
+    for v in raw:
+        if isinstance(v, dict):
+            voices.append((v.get("name") or v.get("id"), v.get("id")))
+        else:
+            voices.append((v, v))
+    # English voices first so the default page is relevant for most users
+    voices.sort(key=lambda t: 0 if str(t[1]).startswith(("en", "v2/en")) else 1)
+    return voices
 
 
 def _fetch_audio_bytes(audio_url):

@@ -112,26 +112,78 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("SETTINGS ERROR")
         await update.message.reply_text("❌ Unable to open settings.")
 
+async def show_library_message(message, user_id):
+    """Render the library list.
+
+    Works for both /library (update.message exists) and button presses
+    (only query.message exists).
+    """
+    items = get_library(user_id, limit=10)
+    if not items:
+        await message.reply_text(
+            "📚 *Your Library*\n\nNo saved audios yet.", parse_mode="Markdown"
+        )
+        return
+    keyboard = []
+    for item in items:
+        item_id, text = item[0], item[1]
+        short = text[:30] + "..." if len(text) > 30 else text
+        keyboard.append([InlineKeyboardButton(f"📄 {short}", callback_data=f"lib:{item_id}")])
+    await message.reply_text(
+        "📚 *Your Library*\n\nClick any to view details",
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown",
+    )
+
 async def library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         add_user(update.effective_user.id)
-        items = get_library(update.effective_user.id, limit=10)
-        if not items:
-            await update.message.reply_text(
-                "📚 *Your Library*\n\nNo saved audios yet.", parse_mode="Markdown"
-            )
-            return
-        keyboard = []
-        for item in items:
-            item_id, text, voice, _, created_at = item
-            short = text[:30] + "..." if len(text) > 30 else text
-            keyboard.append([InlineKeyboardButton(f"📄 {short}", callback_data=f"lib:{item_id}")])
-        await update.message.reply_text(
-            "📚 *Your Library*\n\nClick any to view details",
-            reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown",
-        )
+        await show_library_message(update.message, update.effective_user.id)
     except Exception:
         logger.exception("LIBRARY ERROR")
+
+VOICES_PER_PAGE = 20
+
+def voices_keyboard(page, user_id):
+    """Two-column paginated voice buttons, ✅ on the user's current voice."""
+    voices = get_voices()
+    if not voices:
+        return None
+    current = get_voice(user_id)
+    start = page * VOICES_PER_PAGE
+    chunk = voices[start:start + VOICES_PER_PAGE]
+    keyboard = []
+    row = []
+    for name, voice in chunk:
+        label = f"✅ {name}" if voice == current else name
+        row.append(InlineKeyboardButton(label[:40], callback_data=f"voice:{voice}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"vpage:{page-1}"))
+    total_pages = (len(voices) + VOICES_PER_PAGE - 1) // VOICES_PER_PAGE
+    nav.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="noop"))
+    if start + VOICES_PER_PAGE < len(voices):
+        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"vpage:{page+1}"))
+    keyboard.append(nav)
+    keyboard.append([InlineKeyboardButton("← Back", callback_data="settings")])
+    return InlineKeyboardMarkup(keyboard)
+
+async def show_voices(query, user_id, page=0):
+    try:
+        markup = voices_keyboard(page, user_id)
+        if markup is None:
+            await query.edit_message_text("No voices available.")
+            return
+        await query.edit_message_text(
+            "🔊 *Select a Voice*",
+            reply_markup=markup, parse_mode="Markdown",
+        )
+    except Exception:
+        logger.exception("VOICE LIST ERROR")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -147,30 +199,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if data == "tts":
             waiting_for_text.add(user_id)
             await query.message.reply_text(
-                "📝 *Send the text you want to convert.*", parse_mode="Markdown"
+                "📝 *Send the text you want to convert.*\n\n"
+                f"Max {MAX_TEXT_LENGTH} characters. /cancel to stop.",
+                parse_mode="Markdown"
             )
         elif data == "settings":
             keyboard = [[InlineKeyboardButton("🔊 Voice", callback_data="settings_voice")]]
             await query.edit_message_text("⚙️ *Settings*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         elif data == "library_view":
-            await library(update, context)
+            await show_library_message(query.message, user_id)
+        elif data == "noop":
+            pass
         elif data == "settings_voice":
-            await query.edit_message_text("Loading voices...")
-            try:
-                voices = get_voices()
-                if not voices:
-                    await query.edit_message_text("No voices available.")
-                    return
-                keyboard = []
-                for name, voice in voices:
-                    keyboard.append([InlineKeyboardButton(name, callback_data=f"voice:{voice}")])
-                keyboard.append([InlineKeyboardButton("← Back", callback_data="settings")])
-                await query.edit_message_text(
-                    "🔊 *Select a Voice*",
-                    reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown",
-                )
-            except Exception:
-                logger.exception("VOICE ERROR")
+            await show_voices(query, user_id, page=0)
+        elif data.startswith("vpage:"):
+            page = int(data.split(":", 1)[1])
+            await show_voices(query, user_id, page=page)
         elif data.startswith("voice:"):
             voice = data.split(":", 1)[1]
             await query.edit_message_text(f"✅ Voice set to: {voice}")
