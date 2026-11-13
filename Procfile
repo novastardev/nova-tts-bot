@@ -1,1 +1,1 @@
-web: python tts_monitor.py
+web: python bot.py
