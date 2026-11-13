@@ -26,6 +26,11 @@ from config import (
     TELEGRAM_BOT_TOKEN,
     ALLOWED_CHAT_IDS,
     BOT_OWNER_HANDLE,
+    PUBLIC_MODE,
+    OWNER_CHAT_ID,
+    MAX_TEXT_LENGTH,
+    COOLDOWN_SECONDS,
+    DAILY_LIMIT,
 )
 from database import (
     init_db,
@@ -35,6 +40,10 @@ from database import (
     get_library,
     get_library_item,
     delete_from_library,
+    save_to_library,
+    is_new_user,
+    check_and_record_usage,
+    get_stats,
 )
 from tts import get_voices, generate_speech
 
@@ -45,7 +54,18 @@ from tts import get_voices, generate_speech
 waiting_for_text = set()
 
 def is_chat_allowed(user_id):
+    if PUBLIC_MODE:
+        return True
     return user_id in ALLOWED_CHAT_IDS
+
+
+def notify_owner(context, text):
+    """Best-effort notification to the owner's chat."""
+    if OWNER_CHAT_ID:
+        try:
+            context.bot.send_message(chat_id=OWNER_CHAT_ID, text=text)
+        except Exception:
+            logger.exception("Failed to notify owner")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -55,6 +75,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"❌ Access Denied\n\nPlease ask {BOT_OWNER_HANDLE} to grant you access."
             )
             return
+        if is_new_user(user_id):
+            notify_owner(
+                context,
+                f"🎉 New user!\n\n"
+                f"Name: {update.effective_user.full_name}\n"
+                f"Username: @{update.effective_user.username or 'none'}\n"
+                f"ID: {user_id}",
+            )
         add_user(user_id)
         keyboard = [
             [InlineKeyboardButton("🎙️ Text to Speech", callback_data="tts")],
@@ -174,7 +202,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not item or not item[3]:
                 await query.answer("Not found", show_alert=True)
                 return
-            await query.message.reply_voice(item[3], parse_mode="Markdown")
+            await query.message.reply_voice(item[3])
         elif data.startswith("del:"):
             item_id = int(data.split(":", 1)[1])
             delete_from_library(user_id, item_id)
@@ -185,12 +213,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = update.effective_user.id
+        if not is_chat_allowed(user_id):
+            return
         text = update.message.text
         if user_id not in waiting_for_text:
             return
         waiting_for_text.discard(user_id)
 
-        await update.message.reply_text("⏳ *Generating...*")
+        if len(text) > MAX_TEXT_LENGTH:
+            await update.message.reply_text(
+                f"📏 Text too long ({len(text)} chars).\n"
+                f"Maximum is {MAX_TEXT_LENGTH} characters."
+            )
+            return
+
+        allowed, info = check_and_record_usage(user_id, COOLDOWN_SECONDS, DAILY_LIMIT)
+        if not allowed:
+            await update.message.reply_text(info)
+            return
+        remaining = info
+
+        await update.message.reply_text(
+            f"⏳ *Generating...* ({remaining} left today)",
+            parse_mode="Markdown",
+        )
         voice = get_voice(user_id)
         if not voice:
             await update.message.reply_text("⚠️ No voice selected. Click Settings → Voice first.")
@@ -198,11 +244,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = generate_speech(text, voice)
         if result.get("success") and result.get("audio"):
-            await update.message.reply_voice(result["audio"])
+            audio = result["audio"]
+            save_to_library(user_id, text, voice, audio)
+            await update.message.reply_voice(audio)
         else:
             await update.message.reply_text(f"❌ Error: {result.get('error', 'Unknown')}")
     except Exception:
         logger.exception("TEXT ERROR")
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        user_id = update.effective_user.id
+        if user_id != OWNER_CHAT_ID:
+            await update.message.reply_text("❌ This command is for the bot owner only.")
+            return
+        total_users, gens_today, gens_total = get_stats()
+        await update.message.reply_text(
+            f"📊 *Bot Stats*\n\n"
+            f"👥 Total users: {total_users}\n"
+            f"🎙️ Generations today: {gens_today}\n"
+            f"📈 Generations all-time: {gens_total}\n"
+            f"🔒 Mode: {'PUBLIC 🌍' if PUBLIC_MODE else 'PRIVATE 🔐'}",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        logger.exception("STATS ERROR")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -236,6 +303,7 @@ def main():
     app.add_handler(CommandHandler("settings", settings))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("library", library))
+    app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_error_handler(error_handler)

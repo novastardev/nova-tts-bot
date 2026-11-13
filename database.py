@@ -30,8 +30,104 @@ def init_db():
         )
     """)
 
+    # Usage tracking for rate limiting & stats (public mode)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage (
+            user_id INTEGER NOT NULL,
+            day TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            last_request REAL NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, day)
+        )
+    """)
+
     conn.commit()
     conn.close()
+
+
+def is_new_user(user_id):
+    """Return True if this user_id has never been seen before."""
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return not exists
+
+
+def check_and_record_usage(user_id, cooldown_seconds, daily_limit):
+    """Rate-limit check + recording in one call.
+
+    Returns:
+        (True, remaining_today) if the request is allowed
+        (False, message) if the user hit a limit
+    """
+    import time as _time
+
+    now = _time.time()
+    today = _time.strftime("%Y-%m-%d")
+
+    conn = connect()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT count, last_request FROM usage WHERE user_id = ? AND day = ?",
+        (user_id, today),
+    )
+    row = cursor.fetchone()
+
+    if row:
+        count, last_request = row
+        if now - last_request < cooldown_seconds:
+            wait = int(cooldown_seconds - (now - last_request)) + 1
+            conn.close()
+            return False, f"⏳ Please wait {wait}s before your next request."
+        if count >= daily_limit:
+            conn.close()
+            return False, (
+                f"📊 Daily limit reached ({daily_limit} generations/day).\n"
+                "Come back tomorrow! 🌙"
+            )
+        new_count = count + 1
+        cursor.execute(
+            """
+            UPDATE usage SET count = ?, last_request = ?
+            WHERE user_id = ? AND day = ?
+            """,
+            (new_count, now, user_id, today),
+        )
+    else:
+        new_count = 1
+        cursor.execute(
+            "INSERT INTO usage (user_id, day, count, last_request) VALUES (?, ?, ?, ?)",
+            (user_id, today, new_count, now),
+        )
+
+    conn.commit()
+    conn.close()
+    return True, daily_limit - new_count
+
+
+def get_stats():
+    """Global stats for the owner: (total_users, generations_today, generations_total)."""
+    import time as _time
+
+    today = _time.strftime("%Y-%m-%d")
+
+    conn = connect()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COALESCE(SUM(count), 0) FROM usage WHERE day = ?", (today,))
+    gens_today = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COALESCE(SUM(count), 0) FROM usage")
+    gens_total = cursor.fetchone()[0]
+
+    conn.close()
+    return total_users, gens_today, gens_total
 
 
 def add_user(user_id):

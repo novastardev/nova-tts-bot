@@ -24,56 +24,71 @@ def get_voices():
     return data.get("voices", [])
 
 
+def _fetch_audio_bytes(audio_url):
+    audio = requests.get(audio_url, timeout=60)
+    audio.raise_for_status()
+    return audio.content
+
+
 def generate_speech(text, voice):
-    response = requests.post(
-        f"{BASE_URL}/tts/",
-        headers=HEADERS,
-        json={
-            "model": "kokoro",
-            "text": text,
-            "voice": voice,
-            "format": "mp3"
-        },
-        timeout=30
-    )
+    """Generate speech and return a result dict.
 
-    response.raise_for_status()
-
-    data = response.json()
-    job_uuid = data.get("uuid")
-
-    if not job_uuid:
-        raise RuntimeError("No TTS job ID was returned.")
-
-    for _ in range(60):
-        result = requests.get(
-            f"{BASE_URL}/speech/results/",
-            params={"uuid": job_uuid},
+    Returns:
+        {"success": True, "audio": <bytes>} on success
+        {"success": False, "error": "<message>"} on failure
+    """
+    try:
+        response = requests.post(
+            f"{BASE_URL}/tts/",
             headers=HEADERS,
+            json={
+                "model": "kokoro",
+                "text": text,
+                "voice": voice,
+                "format": "mp3"
+            },
             timeout=30
         )
 
-        result.raise_for_status()
-        result_data = result.json()
+        response.raise_for_status()
 
-        status = result_data.get("status")
+        data = response.json()
+        job_uuid = data.get("uuid")
 
-        if status == "completed":
-            audio_url = result_data.get("result_url")
+        if not job_uuid:
+            raise RuntimeError("No TTS job ID was returned.")
 
-            if not audio_url:
-                raise RuntimeError("No audio URL was returned.")
-
-            audio = requests.get(audio_url, timeout=60)
-            audio.raise_for_status()
-
-            return audio.content
-
-        if status == "failed":
-            raise RuntimeError(
-                result_data.get("error", "TTS generation failed.")
+        for _ in range(60):
+            result = requests.get(
+                f"{BASE_URL}/speech/results/",
+                params={"uuid": job_uuid},
+                headers=HEADERS,
+                timeout=30
             )
 
-        time.sleep(1.5)
+            result.raise_for_status()
+            result_data = result.json()
 
-    raise TimeoutError("TTS generation timed out.")
+            status = result_data.get("status")
+
+            if status == "completed":
+                audio_url = result_data.get("result_url")
+
+                if not audio_url:
+                    raise RuntimeError("No audio URL was returned.")
+
+                return {"success": True, "audio": _fetch_audio_bytes(audio_url)}
+
+            if status == "failed":
+                raise RuntimeError(
+                    result_data.get("error", "TTS generation failed.")
+                )
+
+            time.sleep(1.5)
+
+        raise TimeoutError("TTS generation timed out.")
+
+    except requests.HTTPError as e:
+        return {"success": False, "error": f"TTS service error: {e.response.status_code}"}
+    except (requests.RequestException, RuntimeError, TimeoutError) as e:
+        return {"success": False, "error": str(e)}
