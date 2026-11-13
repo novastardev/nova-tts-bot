@@ -346,6 +346,30 @@ async def start_tts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
+REPO_URL = "https://github.com/novastardev/nova-tts-bot"
+
+async def contribute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("⭐ Star on GitHub", url=REPO_URL)],
+        [InlineKeyboardButton("🐛 Report a Bug", url=f"{REPO_URL}/issues/new")],
+    ]
+    await update.message.reply_text(
+        "🛠️ *Contribute to Nova-TTS Bot*\n\n"
+        "This bot is *open source*! 🎉\n\n"
+        f"📦 Repository owner: *Novastar* (@novastar_dev)\n"
+        f"🔗 Source code: {REPO_URL}\n\n"
+        "*How you can help:*\n"
+        "• ⭐ Star the repo\n"
+        "• 🍴 Fork it & add features\n"
+        "• 🐛 Report bugs via Issues\n"
+        "• 📖 Improve the docs\n"
+        "• 🔊 Suggest new voices\n\n"
+        "Every contribution makes the bot better. Thank you! 💙",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown",
+        disable_web_page_preview=True,
+    )
+
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "*Built by Novastar* 👨‍💻\n\n"
@@ -387,6 +411,7 @@ def main():
     app.add_handler(CommandHandler("settings", settings))
     app.add_handler(CommandHandler("library", library))
     app.add_handler(CommandHandler("about", about))
+    app.add_handler(CommandHandler("contribute", contribute))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CallbackQueryHandler(button_handler))
