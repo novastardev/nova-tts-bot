@@ -353,33 +353,35 @@ async def contribute(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⭐ Star on GitHub", url=REPO_URL)],
         [InlineKeyboardButton("🐛 Report a Bug", url=f"{REPO_URL}/issues/new")],
     ]
+    # NOTE: HTML mode — Markdown mode breaks on underscores in @novastar_dev
     await update.message.reply_text(
-        "🛠️ *Contribute to Nova-TTS Bot*\n\n"
-        "This bot is *open source*! 🎉\n\n"
-        f"📦 Repository owner: *Novastar* (@novastar_dev)\n"
+        "🛠️ <b>Contribute to Nova-TTS Bot</b>\n\n"
+        "This bot is <b>open source</b>! 🎉\n\n"
+        f"📦 Repository owner: <b>Novastar</b> (@novastar_dev)\n"
         f"🔗 Source code: {REPO_URL}\n\n"
-        "*How you can help:*\n"
+        "<b>How you can help:</b>\n"
         "• ⭐ Star the repo\n"
-        "• 🍴 Fork it & add features\n"
+        "• 🍴 Fork it &amp; add features\n"
         "• 🐛 Report bugs via Issues\n"
         "• 📖 Improve the docs\n"
         "• 🔊 Suggest new voices\n\n"
         "Every contribution makes the bot better. Thank you! 💙",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
+        parse_mode="HTML",
         disable_web_page_preview=True,
     )
 
 async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # NOTE: HTML mode — Markdown mode breaks on underscores in @novastar_dev
     await update.message.reply_text(
-        "*Built by Novastar* 👨‍💻\n\n"
+        "<b>Built by Novastar</b> 👨‍💻\n\n"
         "A passionate IT developer creating awesome tools.\n"
         "Currently focused on building intelligent Telegram bots and innovative solutions.\n\n"
-        "*Get in touch:*\n"
-        "• Telegram: @novastar\n"
+        "<b>Get in touch:</b>\n"
+        "• Telegram: @novastar_dev\n"
         "• Portfolio: novastar-dev.vercel.app\n\n"
         "Feel free to reach out for collaborations, questions, or just to say hi! 😁",
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
