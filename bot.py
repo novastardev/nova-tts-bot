@@ -54,6 +54,19 @@ from tts import get_voices, generate_speech
 
 waiting_for_text = set()
 
+def main_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎙️ Text to Speech", callback_data="tts")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
+        [InlineKeyboardButton("📚 My Library", callback_data="library_view")],
+    ])
+
+MENU_TEXT = (
+    "🔊 *Text to Speech Bot*\n\n"
+    "Convert your text into natural speech with multiple voices.\n\n"
+    "Tap a button below to get started 👇"
+)
+
 def is_chat_allowed(user_id):
     if PUBLIC_MODE:
         return True
@@ -85,26 +98,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"ID: {user_id}",
             )
         add_user(user_id)
-        keyboard = [
-            [InlineKeyboardButton("🎙️ Text to Speech", callback_data="tts")],
-            [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
-            [InlineKeyboardButton("📚 My Library", callback_data="library_view")],
-        ]
-        await update.message.reply_text(
-            "🔊 *Text to Speech Bot*\n\n"
-            "Convert your text into natural speech with multiple voices.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "*Built by Novastar* 👨‍💻\n\n"
-            "A passionate IT developer creating awesome tools.\n"
-            "Currently focused on building intelligent Telegram bots and innovative solutions.\n\n"
-            "*Get in touch:*\n"
-            "• Telegram: @novastar\n"
-            "• Portfolio: novastar-dev.vercel.app\n\n"
-            "Feel free to reach out for collaborations, questions, or just to say hi! 😁\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown",
-        )
+        await update.message.reply_text(MENU_TEXT, reply_markup=main_menu_keyboard(), parse_mode="Markdown")
     except Exception:
         logger.exception("START ERROR")
         await update.message.reply_text("❌ Something went wrong.")
@@ -233,6 +227,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         text = update.message.text
         if user_id not in waiting_for_text:
+            # User sent a message outside the TTS flow — they're probably
+            # lost. Show the start menu so they can find their way.
+            add_user(user_id)
+            await update.message.reply_text(
+                "🤔 *I didn't quite get that.*\n\n"
+                "Here's the menu to get you started 👇",
+                reply_markup=main_menu_keyboard(),
+                parse_mode="Markdown",
+            )
             return
         waiting_for_text.discard(user_id)
 
@@ -286,16 +289,37 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("STATS ERROR")
 
+async def start_tts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Slash-command version of the 🎙️ Text to Speech button."""
+    user_id = update.effective_user.id
+    if not is_chat_allowed(user_id):
+        return
+    add_user(user_id)
+    waiting_for_text.add(user_id)
+    await update.message.reply_text(
+        "📝 *Send the text you want to convert.*\n\n"
+        f"Max {MAX_TEXT_LENGTH} characters. /cancel to stop.",
+        parse_mode="Markdown",
+    )
+
+async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "*Built by Novastar* 👨‍💻\n\n"
+        "A passionate IT developer creating awesome tools.\n"
+        "Currently focused on building intelligent Telegram bots and innovative solutions.\n\n"
+        "*Get in touch:*\n"
+        "• Telegram: @novastar\n"
+        "• Portfolio: novastar-dev.vercel.app\n\n"
+        "Feel free to reach out for collaborations, questions, or just to say hi! 😁",
+        parse_mode="Markdown",
+    )
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     waiting_for_text.discard(user_id)
-    keyboard = [
-        [InlineKeyboardButton("🎙️ Text to Speech", callback_data="tts")],
-        [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
-    ]
     await update.message.reply_text(
-        "❌ *Cancelled*",
-        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown",
+        "❌ *Cancelled*\n\nHere's the menu 👇",
+        reply_markup=main_menu_keyboard(), parse_mode="Markdown",
     )
 
 async def error_handler(update, context):
@@ -315,9 +339,11 @@ def main():
         .build()
     )
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("tts", start_tts_command))
     app.add_handler(CommandHandler("settings", settings))
-    app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("library", library))
+    app.add_handler(CommandHandler("about", about))
+    app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
