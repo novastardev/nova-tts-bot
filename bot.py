@@ -401,8 +401,12 @@ async def error_handler(update, context):
 
 def main():
     init_db()
-    PORT = int(os.environ.get("PORT", 8080))
-    
+
+    # ---- Dashboard (same process, same port as the bot) ----
+    from dashboard import attach_log_handler, start_dashboard
+    attach_log_handler()          # stream bot logs to the dashboard live
+    start_dashboard()             # non-blocking; serves on $PORT (default 8080)
+
     app = (
         Application.builder()
         .token(TELEGRAM_BOT_TOKEN)
@@ -420,9 +424,18 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_error_handler(error_handler)
 
-    print("🔊 Nova-TTS Bot starting on port", PORT)
+    print("🔊 Nova-TTS Bot starting — dashboard + bot on one port")
     print("--------------------------------")
-    app.run_polling(drop_pending_updates=True)
+    try:
+        app.run_polling(drop_pending_updates=True)
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        logger.exception("Bot crashed — keeping dashboard alive so the error is visible")
+        import threading
+        from dashboard import _push_log
+        _push_log("❌ BOT CRASHED — see logs below. Dashboard is still running.")
+        threading.Event().wait()  # block forever, dashboard thread keeps serving
 
 if __name__ == "__main__":
     main()
