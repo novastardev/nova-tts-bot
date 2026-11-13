@@ -41,6 +41,9 @@ except ValueError:
     OWNER_CHAT_ID = None
 
 # --- Public-mode limits (protect your TTS credits) ---
+# Rate limiting is OFF by default so open-source users can test freely.
+# Set RATE_LIMIT_ENABLED=true to turn on cooldown + daily cap.
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "false").strip().lower() in ("true", "1", "yes")
 MAX_TEXT_LENGTH = int(os.getenv("MAX_TEXT_LENGTH", "500"))      # chars per request
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "15"))     # between requests
 DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", "10"))               # generations per user/day

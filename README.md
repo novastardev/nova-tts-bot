@@ -280,9 +280,10 @@ nova-tts-bot/
 | Check | Status |
 |-------|--------|
 | `.env` is gitignored | ✅ Your tokens never leave your machine |
-| Whitelist-only access | ✅ Only approved Chat IDs can use the bot |
+| Public / private modes | ✅ `PUBLIC_MODE=false` keeps whitelist-only access; `true` opens to everyone |
 | No hardcoded secrets | ✅ All sensitive data from environment variables |
-| Rate limiting | ✅ TTS generation has a 60-second timeout |
+| Rate limiting | ✅ Optional per-user cooldown + daily cap (`RATE_LIMIT_ENABLED=true`). Off by default for easy testing — enable it before opening the bot to strangers |
+| Usage tracking | ✅ All generations recorded for `/stats`, even with limits off |
 | Log monitoring | ✅ Real-time dashboard to spot issues |
 
 ---

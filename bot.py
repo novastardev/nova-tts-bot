@@ -28,6 +28,7 @@ from config import (
     BOT_OWNER_HANDLE,
     PUBLIC_MODE,
     OWNER_CHAT_ID,
+    RATE_LIMIT_ENABLED,
     MAX_TEXT_LENGTH,
     COOLDOWN_SECONDS,
     DAILY_LIMIT,
@@ -210,6 +211,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("BUTTON ERROR")
 
+def check_usage(user_id):
+    """Apply rate limits if enabled; always record usage for /stats.
+
+    Returns (allowed, message). message is empty string when allowed.
+    """
+    if RATE_LIMIT_ENABLED:
+        allowed, info = check_and_record_usage(user_id, COOLDOWN_SECONDS, DAILY_LIMIT)
+        if not allowed:
+            return False, info
+        return True, f"({info} left today)"
+    # Limits off: just record the usage silently for stats
+    check_and_record_usage(user_id, 0, 10**9)
+    return True, ""
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = update.effective_user.id
@@ -227,16 +243,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        allowed, info = check_and_record_usage(user_id, COOLDOWN_SECONDS, DAILY_LIMIT)
+        allowed, remaining_msg = check_usage(user_id)
         if not allowed:
-            await update.message.reply_text(info)
+            await update.message.reply_text(remaining_msg)
             return
-        remaining = info
 
-        await update.message.reply_text(
-            f"⏳ *Generating...* ({remaining} left today)",
-            parse_mode="Markdown",
-        )
+        status_text = "⏳ *Generating...*"
+        if remaining_msg:
+            status_text = f"⏳ *Generating...* {remaining_msg}"
+        await update.message.reply_text(status_text, parse_mode="Markdown")
         voice = get_voice(user_id)
         if not voice:
             await update.message.reply_text("⚠️ No voice selected. Click Settings → Voice first.")
